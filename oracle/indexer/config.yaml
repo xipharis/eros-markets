@@ -114,6 +114,9 @@ contracts:
       - event: Transfer(address indexed from, address indexed to, uint256 value)
 chains:
   - id: 10143
+    rpc:
+      url: https://spectrum-01.simplystaking.xyz/aXlqaXFscGQtODcwZGEzYWI/9it5UMrdGycv8A/monad/tn/10143/shared/pruned/rpc/
+      for: sync
     start_block: 68951846
     contracts:
       - name: ResolutionOracle
