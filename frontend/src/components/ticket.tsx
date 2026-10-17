@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Address } from "viem";
 import { engineAbi } from "@/abi/engine";
 import { client, type MarketSnapshot, type TraderSnapshot } from "@/lib/reads";
 import { usePermissions } from "@/lib/privy-api";
-import { expiryBlock, type CloseIntent } from "@/lib/trade-intent";
+import { expiryBlock, marketTick, MARKET_SLIPPAGE_TICKS, type CloseIntent } from "@/lib/trade-intent";
 import { ownerTrader } from "@/lib/trader";
 import { closeToWalletCalls } from "@/lib/close-to-wallet";
 import { targetLeverageLots } from "@/lib/leverage";
@@ -14,13 +14,19 @@ import { orderPreviewCurrent, orderPreviewOptions } from "@/lib/order-preview";
 import { canonicalTrade, displayTickForOutcome, type TradeIntent } from "@/lib/trade-view";
 import { useMaxOrder } from "@/lib/use-max-order";
 import { OrderSummary } from "./order-summary";
+import { verifiedProfile } from "@/lib/capabilities";
+import { sideMarginAt } from "@/lib/margin-lens";
+import { requiredCollateralQ, qToAtomsCeil } from "@/lib/required-collateral";
+import { fundingPlan } from "@/lib/funds";
+import { allocationBlocker, validateAllocation } from "@/lib/allocation-guard";
+import { atomsToUsdc } from "@/lib/units";
 import { qToMoney } from "@/lib/units";
 import { REJECT, ORDER_KIND } from "@/lib/enums";
 import { useTx, summarizeOrder } from "@/lib/tx";
 import { lotsToClaims, parseClaimsToLots, parsePriceToTick } from "@/lib/units";
 import { FieldError, useFieldErrors, ReadError } from "./feedback";
 import { TxFeedback } from "./tx-feedback";
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useLoginAction, useOwner } from "./wallet";
 import { useSwitchChain } from "wagmi";
 import { chain } from "@/config/chain";
@@ -34,6 +40,16 @@ type Parsed = { ok: true; tick: number; lots: bigint } | { ok: false; error: str
 const TRADE_CHOICES: TradeIntent[] = [{ outcome: "YES", direction: "long" }, { outcome: "YES", direction: "short" }];
 const intentLabel = (intent: TradeIntent) => `${intent.direction === "long" ? "Long" : "Short"} ${intent.outcome}`;
 
+// Market is an IOC priced from book depth; the other types map to the engine's order kinds.
+type OrderType = "Market" | (typeof ORDER_KIND)[number];
+const ORDER_TYPES: { type: OrderType; kind: number; hint: string }[] = [
+  { type: "Market", kind: 1, hint: `Trades now at the best prices on the book, up to ${(MARKET_SLIPPAGE_TICKS / 1000).toFixed(3)} past the best. Anything unfilled is cancelled.` },
+  { type: "Limit", kind: 0, hint: "You set the price. Whatever does not fill right away waits on the book." },
+  { type: "IOC", kind: 1, hint: "Immediate or cancel: fills what it can at your price now, then cancels the rest." },
+  { type: "Post only", kind: 2, hint: "Only waits on the book. Rejected if it would trade immediately." },
+];
+type DepthLevel = { tick: number; bidLots: bigint; askLots: bigint };
+
 function useDebounced<T>(v: T, ms = 250) {
   const [d, setD] = useState(v);
   useEffect(() => {
@@ -43,15 +59,21 @@ function useDebounced<T>(v: T, ms = 250) {
   return d;
 }
 
-export function Ticket({ engine, market, trader, intent, bookPrice, readUnavailable = false }: { engine: Address; market?: MarketSnapshot; trader?: TraderSnapshot; intent?: CloseIntent; bookPrice?: BookPriceIntent; readUnavailable?: boolean }) {
+export function Ticket({ engine, market, trader, intent, bookPrice, levels, readUnavailable = false }: { engine: Address; market?: MarketSnapshot; trader?: TraderSnapshot; intent?: CloseIntent; bookPrice?: BookPriceIntent; levels?: DepthLevel[]; readUnavailable?: boolean }) {
   const archived = marketByEngine(engine)?.archived ?? false;
   const owner = useOwner();
   const loginAction = useLoginAction();
   const { switchChain, error: chainError } = useSwitchChain();
   const [tradeIntent, setTradeIntent] = useState<TradeIntent>(TRADE_CHOICES[0]);
   const side = canonicalTrade(tradeIntent, 500).side;
-  const [kind, setKind] = useState(0);
-  const [price, setPrice] = useState("");
+  const [orderType, setOrderType] = useState<OrderType>("Market");
+  const kind = ORDER_TYPES.find((o) => o.type === orderType)!.kind;
+  const marketOrder = orderType === "Market";
+  const rests = orderType === "Limit" || orderType === "Post only";
+  const optionsId = useId();
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [expiryOn, setExpiryOn] = useState(false);
+  const [limitPrice, setPrice] = useState("");
   const [size, setSize] = useState("");
   const [inputRevision, setInputRevision] = useState(0);
   const [reduceOnlyChoice, setReduceOnly] = useState(false);
@@ -61,12 +83,17 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
   const delegated = permissions.data?.modes.find((p) => p.mode === "trade" && p.granted && p.engines.includes(engine.toLowerCase()));
   const [oneClick, setOneClick] = useState(false);
   const [expiry, setExpiry] = useState("");
-  useEffect(() => { if (intent) { setTradeIntent({ outcome: "YES", direction: intent.side === "buy" ? "long" : "short" }); setSize(intent.size); setPrice(intent.price); setReduceOnly(true); setKind(1); setExpiry(""); setTargetLeverage(undefined); setInputRevision((n) => n + 1); } }, [intent]);
-  // A book click carries a YES price. Convert once when that new click arrives.
-  useEffect(() => { if (bookPrice) { setPrice((displayTickForOutcome(tradeIntent.outcome, bookPrice.tick) / 1000).toFixed(3)); setTargetLeverage(undefined); setInputRevision((n) => n + 1); } }, [bookPrice]);
+  useEffect(() => { if (intent) { setTradeIntent({ outcome: "YES", direction: intent.side === "buy" ? "long" : "short" }); setSize(intent.size); setPrice(intent.price); setReduceOnly(true); setOrderType("IOC"); setExpiryOn(false); setExpiry(""); setTargetLeverage(undefined); setInputRevision((n) => n + 1); } }, [intent]);
+  // A book click carries a YES price, which makes the order a limit. Convert once when that new click arrives.
+  useEffect(() => { if (bookPrice) { setPrice((displayTickForOutcome(tradeIntent.outcome, bookPrice.tick) / 1000).toFixed(3)); setOrderType((t) => t === "Market" ? "Limit" : t); setTargetLeverage(undefined); setInputRevision((n) => n + 1); } }, [bookPrice]);
   let expires = 0, expiryError = "";
-  try { expires = expiryBlock(expiry, market?.block ?? 0n); } catch (e) { expiryError = (e as Error).message; }
+  if (rests && expiryOn) try { expires = expiryBlock(expiry, market?.block ?? 0n); } catch (e) { expiryError = (e as Error).message; }
   const cap = market?.leverageCaps[side === "buy" ? "long" : "short"];
+  // A market order's limit is the depth level that covers the size (the touch until a size is entered).
+  let sizeLots = 0n;
+  try { sizeLots = parseClaimsToLots(size); } catch { /* Incomplete input. */ }
+  const touchTick = marketTick(sizeLots || 1n, side === "buy", market?.bestBid ?? 0, market?.bestAsk ?? 0, levels ?? []);
+  const price = marketOrder ? (touchTick ? (displayTickForOutcome(tradeIntent.outcome, touchTick) / 1000).toFixed(3) : "") : limitPrice;
   const bestTick = (side === "buy" ? market?.bestAsk : market?.bestBid) ?? 0;
   const [targetLeverage, setTargetLeverage] = useState<number>();
   useEffect(() => { setTargetLeverage(undefined); }, [cap]);
@@ -79,6 +106,11 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
   const sizingEquity = flat ? cashQ : markLive ? trader?.account?.preview.markEquityQ ?? 0n : 0n;
   const reservedOrders = !!trader?.account && (trader.account.preview.orders.bidLots > 0n || trader.account.preview.orders.askLots > 0n);
   const canSizeLeverage = !!trader?.account && !reservedOrders && !reduceOnly && sizingEquity > 0n && (flat || markLive);
+  // A fresh position: leverage is chosen, not derived from cash, and any missing collateral comes from the wallet.
+  const fresh = flat && !reservedOrders && !reduceOnly && !archived;
+  const [openLeverage, setOpenLeverage] = useState(1);
+  useEffect(() => { if (cap !== undefined && BigInt(openLeverage) > cap) setOpenLeverage(1); }, [cap, openLeverage]);
+  useEffect(() => { if (!markLive) setOpenLeverage(1); }, [markLive]);
   // An order against the held side lowers leverage, so the side's cap does not limit it.
   const reducing = !flat && (side === "buy") !== (positionLots > 0n);
   // Keyed on cash and position, not mark equity, so a selection survives ordinary mark updates.
@@ -97,7 +129,7 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
   }, [price, size, tradeIntent]);
 
   const fieldErrors = { price: "", size: "", expiry: expiryError };
-  try { parsePriceToTick(price); } catch { fieldErrors.price = "Enter a price from 0.001 to 0.999 (up to 3 decimals)."; }
+  if (!marketOrder) try { parsePriceToTick(price); } catch { fieldErrors.price = "Enter a price from 0.001 to 0.999 (up to 3 decimals)."; }
   try { if (parseClaimsToLots(size) === 0n) fieldErrors.size = "Enter at least 0.001 claims."; } catch { fieldErrors.size = "Enter a positive claim size with up to 3 decimals."; }
   const validation = useFieldErrors(fieldErrors);
 
@@ -120,6 +152,31 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
         markWad: markLive ? market!.risk.markWad : undefined });
     } catch { return undefined; }
   });
+  const profile = market ? verifiedProfile(market.profile.profileHash, market.listing.template, market.listing.deploymentCapX) : undefined;
+  const markTick = markLive ? Number(market!.risk.markWad / 10n ** 15n) : 0;
+  const margin = useQuery({
+    queryKey: ["side-margin", engine, side, dParsed.ok ? dParsed.lots.toString() : "", markTick, market?.block.toString()],
+    enabled: fresh && openLeverage > 1 && markTick > 0 && markTick < 1000 && !!profile && dParsed.ok && !readUnavailable,
+    queryFn: () => sideMarginAt(dParsed.ok ? dParsed.lots : 1n, side === "buy", markTick, market!.risk.secsToT, market!.risk.asOfTime, profile!, market!.block),
+    staleTime: 3500, retry: false,
+  });
+  // Collateral this order needs in the market. Leveraged requirements carry a 1% margin for time and rounding.
+  let requiredAtoms: bigint | undefined;
+  if (fresh && parsed.ok) try {
+    const imQ = openLeverage === 1 ? undefined : margin.data?.imQ;
+    if (openLeverage === 1 || imQ !== undefined) {
+      const need = qToAtomsCeil(requiredCollateralQ({ lots: parsed.lots, tick: parsed.tick, isBuy: side === "buy", leverage: openLeverage, markWad: markLive ? market!.risk.markWad : undefined, imQ }));
+      requiredAtoms = openLeverage === 1 ? need : need + (need + 99n) / 100n;
+    }
+  } catch { /* Incomplete input. */ }
+  const marketCashAtoms = cashQ > 0n ? cashQ / 10n ** 18n : 0n;
+  // Funding short of an existing position's margin is read from the contract preview instead.
+  const previewShortfall = !fresh && preview.data?.rejection === 8 && preview.data.requiredImQ > preview.data.eMinQ
+    ? qToAtomsCeil(preview.data.requiredImQ - preview.data.eMinQ) * 101n / 100n + 1n : 0n;
+  const shortfall = fresh ? (requiredAtoms !== undefined && requiredAtoms > marketCashAtoms ? requiredAtoms - marketCashAtoms : 0n) : previewShortfall;
+  const fundable = !!trader && trader.wallet + trader.free >= shortfall;
+  const fundingBlocked = shortfall > 0n && market ? allocationBlocker(market) : undefined;
+  const symbol = trader?.assets.symbol ?? "tUSDC";
   const maximum = useMaxOrder({ engine, owner: owner.address, market, trader, tick: priceTick,
     isBuy: side === "buy", reduceOnly, unavailable: readUnavailable, inputRevision });
 
@@ -143,12 +200,18 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
       ? "Market halted"
       : !market.active
         ? "Opens on activation"
-        : traderId === 0
-          ? "Not funded yet"
-          : trader?.block !== market.block ? "Refreshing account…"
+        : owner.connected && !trader ? "Reading your account…"
+          : trader && trader.block !== market.block ? "Refreshing account…"
+              : marketOrder && !touchTick ? (side === "buy" ? "No sell orders to buy from" : "No buy orders to sell to")
               : !parsed.ok
                 ? parsed.error || "Enter price and size"
                 : expiryError ? expiryError
+                : fresh && requiredAtoms === undefined ? (margin.isError ? "Margin estimate unavailable" : "Checking collateral…")
+                : shortfall > 0n && !fundable ? `Needs ${atomsToUsdc(shortfall)} ${symbol} · wallet has ${atomsToUsdc(trader!.wallet + trader!.free)}`
+                : fundingBlocked ? fundingBlocked
+                // An unfunded account has no preview; funding happens first and the order re-checks admission.
+                : shortfall > 0n && (traderId === 0 || preview.data?.rejection === 8) ? null
+                : traderId === 0 ? "Enter a size to fund this market"
                 : preview.isError ? "Order preview unavailable"
                 : !preview.data || !dParsed.ok || parsed.tick !== dParsed.tick || parsed.lots !== dParsed.lots ? "Checking order…"
                 : preview.data.rejection !== 0
@@ -176,11 +239,21 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
 
   async function submit() {
     if (!owner.address || !market || !parsed.ok || blocker || owner.wrongChain) return;
+    const sdk = ownerTrader(engine, owner.address);
+    const funding: Parameters<typeof tx.run>[1] = [];
+    if (shortfall > 0n && trader) {
+      const plan = fundingPlan(shortfall, trader.free, trader.wallet, trader.allowance);
+      const validate = (block: bigint) => validateAllocation(engine, block);
+      if (plan.approve) funding.push({ ...sdk.approve(plan.approve), label: "approve collateral", validate });
+      if (plan.deposit) funding.push({ ...sdk.deposit(plan.deposit), label: "deposit collateral", validate });
+      funding.push({ ...sdk.allocate(plan.allocate), label: "fund market", validate });
+    }
     const filled = await tx.run(
       owner.address,
       [
+        ...funding,
         {
-          ...ownerTrader(engine, owner.address).placeOrder({ kind, isBuy: side === "buy", reduceOnly, tick: parsed.tick, size: parsed.lots, maxFills: market.maxFills, expiryBlock: expires }),
+          ...sdk.placeOrder({ kind, isBuy: side === "buy", reduceOnly, tick: parsed.tick, size: parsed.lots, maxFills: market.maxFills, expiryBlock: expires }),
           label: "order",
           validate: async (blockNumber) => {
             const id = await client.readContract({ address: engine, abi: engineAbi, functionName: "participantId", args: [owner.address!], blockNumber });
@@ -191,7 +264,7 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
         },
       ],
       summarizeOrder,
-      oneClick && delegated ? { previewBlock: market.block } : undefined,
+      oneClick && delegated && !funding.length ? { previewBlock: market.block } : undefined,
     );
     if (!filled || !closing) return;
     let sweep: Awaited<ReturnType<typeof closeToWalletCalls>>;
@@ -216,39 +289,83 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
                 aria-pressed={selected}
                 onClick={() => chooseIntent(choice)}
                 className={cx(
-                  "ui-toggle h-11 border text-sm font-semibold tracking-wide focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal",
+                  "ui-toggle flex h-14 flex-col items-center justify-center gap-0.5 border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal",
                   selected
                     ? long ? "border-bid bg-bid text-on-bid" : "border-ask bg-ask text-on-ask"
                     : long ? "border-bid/60 bg-panel text-bid hover:bg-bid/10" : "border-ask/60 bg-panel text-ask hover:bg-ask/10",
                 )}
               >
-                {intentLabel(choice)}
+                <span className="text-sm font-semibold tracking-wide">{intentLabel(choice)}</span>
+                <span className={cx("text-xs", selected ? "opacity-80" : "text-fg-3")}>{long ? "Odds go up" : "Odds go down"}</span>
               </button>
             );
           })}
         </div>
         {archived && <p className="text-xs text-fg-3">This market accepts position reductions only in this interface.</p>}
-        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Order type" onKeyDown={selectionKeys}>
-          {ORDER_KIND.map((k, i) => (
-            <button
-              key={k}
-              type="button"
-              role="radio"
-              aria-checked={kind === i}
-              tabIndex={kind === i ? 0 : -1}
-              onClick={() => setKind(i)}
-              className={cx(
-                "ui-toggle h-9 border text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal",
-                kind === i ? "border-fg bg-fg text-ground" : "border-line-strong bg-panel text-fg-2 hover:bg-press hover:text-fg",
-              )}
-            >
-              {k}
-            </button>
-          ))}
+
+        <div className="rounded-control bg-ground shadow-[inset_0_0_0_1px_var(--color-line-strong)]">
+          <button type="button" aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => setOptionsOpen((open) => !open)}
+            className="flex min-h-11 w-full items-center gap-3 rounded-control px-3 text-left transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal">
+            <span className="label text-fg-3">Order type</span>
+            <span className="text-sm font-medium text-fg">{orderType}</span>
+            {(reduceOnly || expires > 0) && <span className="label min-w-0 truncate text-signal-text">{[reduceOnly && "Reduce only", expires > 0 && `Expires at #${expires}`].filter(Boolean).join(" · ")}</span>}
+            <ChevronDown size={16} aria-hidden className={cx("ml-auto shrink-0 text-fg-3 transition-transform duration-200", optionsOpen && "rotate-180")} />
+          </button>
+          {optionsOpen && <div id={optionsId} className="grid gap-4 border-t border-line p-2 pb-3">
+            <div className="grid gap-1" role="radiogroup" aria-label="Order type" onKeyDown={selectionKeys}>
+              {ORDER_TYPES.map((o) => {
+                const checked = orderType === o.type;
+                return <button key={o.type} type="button" role="radio" aria-checked={checked} tabIndex={checked ? 0 : -1}
+                  onClick={() => { if (o.type !== "Market" && marketOrder && touchTick) setPrice(price); setOrderType(o.type); setTargetLeverage(undefined); }}
+                  className={cx("grid grid-cols-[0.875rem_minmax(0,1fr)] items-baseline gap-x-2.5 rounded-md px-2 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-signal", checked ? "bg-press" : "hover:bg-hover")}>
+                  <span aria-hidden className={cx("relative top-0.5 h-3.5 w-3.5 rounded-full border", checked ? "border-signal" : "border-line-strong")}>
+                    {checked && <span className="absolute inset-[3px] rounded-full bg-signal" />}
+                  </span>
+                  <span className={cx("text-sm font-medium", checked ? "text-fg" : "text-fg-2")}>{o.type}</span>
+                  <span className="col-start-2 text-xs leading-relaxed text-fg-3">{o.hint}</span>
+                </button>;
+              })}
+            </div>
+            <div className="grid gap-4 border-t border-line px-2 pt-3">
+              <label className="flex items-start gap-2 text-sm text-fg">
+                <span className="relative mt-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  <input
+                    type="checkbox"
+                    checked={reduceOnly}
+                    disabled={archived}
+                    onChange={(e) => { setReduceOnly(e.target.checked); setTargetLeverage(undefined); }}
+                    className="peer absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none border border-line-strong bg-ground checked:bg-action"
+                  />
+                  <Check size={11} strokeWidth={3} className="pointer-events-none relative hidden text-on-action peer-checked:block" aria-hidden />
+                </span>
+                <span className="grid gap-0.5">Reduce only<span className="text-xs leading-relaxed text-fg-3">Only shrinks your current position; never opens or flips one.</span></span>
+              </label>
+              <div className="grid gap-2">
+                <button type="button" role="switch" aria-checked={rests && expiryOn} disabled={!rests} onClick={() => setExpiryOn((on) => !on)}
+                  className="flex items-start justify-between gap-3 text-left disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal">
+                  <span className="grid gap-0.5 text-sm text-fg">Expire at a block
+                    <span className="text-xs leading-relaxed text-fg-3">{rests ? "Cancels the order automatically if it is still open at the block you choose." : "Available for Limit and Post only orders, which wait on the book."}</span>
+                  </span>
+                  <span aria-hidden className={cx("relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200", rests && expiryOn ? "bg-signal" : "bg-press shadow-[inset_0_0_0_1px_var(--color-line-strong)]", !rests && "opacity-50")}>
+                    <span className={cx("absolute top-0.5 h-4 w-4 rounded-full transition-[left] duration-200", rests && expiryOn ? "left-[18px] bg-on-signal" : "left-0.5 bg-fg-3")} />
+                  </span>
+                </button>
+                {rests && expiryOn && <label className="flex flex-col gap-1.5 text-xs text-fg-2">
+                  <span className="label flex justify-between text-fg-3"><span>Block number</span>{market && <span className="tnum">Now #{market.block.toString()}</span>}</span>
+                  <input className={field} inputMode="numeric" placeholder="Enter a future block" value={expiry} {...validation.props("expiry")} onChange={(e) => setExpiry(e.target.value)} />
+                  <FieldError id={validation.errorId("expiry")}>{validation.message("expiry")}</FieldError>
+                </label>}
+              </div>
+            </div>
+          </div>}
         </div>
 
         <div className="grid gap-x-6 gap-y-3 @2xl:grid-cols-2">
         <div className="flex flex-col gap-3">
+        {marketOrder ? <div className="flex items-baseline justify-between gap-3 rounded-md bg-panel px-3 py-2.5" aria-live="polite">
+          <span className="label text-fg-3">Market price</span>
+          <span className="text-sm tnum text-fg">{touchTick ? `${side === "buy" ? "at most" : "at least"} ${price}` : "No orders on the book"}</span>
+        </div> : <>
         <label htmlFor={validation.props("price").id} className="flex flex-col gap-1.5">
           <span className="label flex justify-between text-fg-3">
             <span>{tradeIntent.outcome} price</span>
@@ -262,6 +379,7 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
           <FieldError id={validation.errorId("price")}>{validation.message("price")}</FieldError>
         </label>
 
+        </>}
         <label htmlFor={validation.props("size").id} className="flex flex-col gap-1.5">
           <span className="label flex justify-between text-fg-3">
             <span>Size (claims)</span>
@@ -270,7 +388,8 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
             </button>
           </span>
           <input className={field} inputMode="decimal" placeholder="0.000" value={size} aria-label="Size (claims)" {...validation.props("size")} onChange={(e) => { setSize(e.target.value); setTargetLeverage(undefined); setInputRevision((n) => n + 1); }} />
-          <FieldError id={validation.errorId("size")}>{validation.message("size")}</FieldError>
+          {validation.message("size") ? <FieldError id={validation.errorId("size")}>{validation.message("size")}</FieldError>
+            : <span className="text-xs text-fg-3">Each claim pays 1 USDC if the answer is YES.</span>}
         </label>
         {clampNote ? <p role="status" className="text-xs leading-relaxed text-signal-text">{clampNote}</p>
           : maximum.message && <p role="status" className="text-xs leading-relaxed text-fg-3">{maximum.message}</p>}
@@ -279,49 +398,45 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
         <div className="flex flex-col gap-3">
 
         <div className="grid gap-1.5">
-          <p className="label flex justify-between text-fg-3"><span>Target leverage</span><span>{cap === undefined ? "Reading limit…" : `Current limit ${cap}×`}</span></p>
+          <p className="label flex justify-between text-fg-3"><span>Leverage</span><span>{cap === undefined ? "Reading limit…" : `Current limit ${cap}×`}</span></p>
           <div className="grid grid-cols-5 gap-1" role="group" aria-label="Target leverage">
-            {[1, 2, 3, 4, 5].map((x) => <button key={x} type="button" aria-pressed={targetLeverage === x}
+            {[1, 2, 3, 4, 5].map((x) => fresh ? <button key={x} type="button" aria-pressed={openLeverage === x}
+              title={x > 1 && !markLive ? "Leverage needs a live mark price" : cap !== undefined && BigInt(x) > cap ? `This market currently allows up to ${cap}×` : undefined}
+              disabled={cap === undefined || BigInt(x) > cap || (x > 1 && !markLive) || readUnavailable}
+              className={cx("ui-toggle h-8 border text-xs tnum disabled:cursor-not-allowed", openLeverage === x ? "border-signal bg-signal/10 text-signal-text" : "border-line-strong bg-panel text-fg-2 hover:bg-press")}
+              onClick={() => setOpenLeverage(x)}>{x}×</button>
+              : <button key={x} type="button" aria-pressed={targetLeverage === x}
               title={leverageSizes[x - 1] === 0n ? (reducing ? `Your position is already at or below ${x}×` : `Your position is already at or above ${x}×`) : undefined}
               disabled={!canSizeLeverage || cap === undefined || (!reducing && BigInt(x) > cap) || (x > 1 && !markLive) || !!fieldErrors.price || readUnavailable || trader?.block !== market?.block || !leverageSizes[x - 1]}
-              className={cx("ui-toggle h-7 border text-xs tnum disabled:cursor-not-allowed", targetLeverage === x ? "border-signal bg-signal/10 text-signal-text" : "border-line-strong bg-panel text-fg-2 hover:bg-press")}
+              className={cx("ui-toggle h-8 border text-xs tnum disabled:cursor-not-allowed", targetLeverage === x ? "border-signal bg-signal/10 text-signal-text" : "border-line-strong bg-panel text-fg-2 hover:bg-press")}
               onClick={() => { const lots = leverageSizes[x - 1]; if (!lots) { setTargetLeverage(undefined); return; } setSize(lotsToClaims(lots)); setTargetLeverage(x); setInputRevision((n) => n + 1); }}>{x}×</button>)}
           </div>
+          {fresh && owner.connected && <div className="flex items-baseline justify-between gap-3 rounded-md bg-panel px-3 py-2.5" aria-live="polite">
+            <span className="label text-fg-3">Collateral</span>
+            <span className="text-right text-sm tnum text-fg">{requiredAtoms === undefined ? (parsed.ok ? (margin.isError ? "Unavailable" : "Calculating…") : "—")
+              : <>{atomsToUsdc(requiredAtoms)} {symbol}{shortfall > 0n && <span className="block text-xs text-fg-3">{marketCashAtoms > 0n ? `${atomsToUsdc(marketCashAtoms)} in market · ` : ""}{atomsToUsdc(shortfall)} from your wallet</span>}</>}</span>
+          </div>}
           <details className="text-xs text-fg-3">
             <summary className="cursor-pointer py-1 hover:text-fg">Trading details</summary>
             <div className="grid gap-2 pb-1 pt-2 leading-relaxed">
               <p>Long YES is the same as Short NO, and Short YES is the same as Long NO. Both directions net into one position; an opposite trade can close it.</p>
               {market?.active && !market.halted && cap !== undefined && cap < market.listing.deploymentCapX && <p className="border-l-2 border-signal/60 pl-2 text-fg-2">{market.risk.pricingMode === 0 ? "Bootstrap: 1× until the price windows are ready and normal pricing activates." : !market.risk.indexAvailable || !market.risk.markAvailable ? "Higher leverage is temporarily unavailable while the price windows recover." : "The current risk or reserve limit is below the deployment cap."}</p>}
-              <p>{reservedOrders ? "Cancel open orders before sizing by leverage." : reduceOnly ? "Turn off Reduce only to size by leverage." : !canSizeLeverage ? (flat ? "Fund this market to size by leverage." : "Sizing an open position by leverage needs a live mark.") : fieldErrors.price ? "Enter a valid order price or use the best price, then choose your leverage." : flat ? "Sizes against the live mark and accounts for the spread. The order preview checks margin and fees." : "Sizes this order so your whole position ends at the chosen leverage against your mark equity, accounting for the spread. On the opposite side it reduces toward that leverage and never flips your position. The order preview checks margin and fees."} Limits adjust with price readiness and risk.</p>
+              {fresh && <p>{openLeverage === 1 ? "1× is fully backed: your collateral covers the most this position can lose, so it can never be liquidated." : `At ${openLeverage}× you put up about 1/${openLeverage} of the position's value (at least the market's margin requirement) and the reserve covers the rest. If the price moves against you, the position can be liquidated.`} Missing collateral moves from your wallet into this market when you trade, and stays there until you release it.</p>}
+              {!fresh && <p>{reservedOrders ? "Cancel open orders before sizing by leverage." : reduceOnly ? "Turn off Reduce only to size by leverage." : !canSizeLeverage ? (flat ? "Fund this market to size by leverage." : "Sizing an open position by leverage needs a live mark.") : fieldErrors.price ? "Enter a valid order price or use the best price, then choose your leverage." : flat ? "Sizes against the live mark and accounts for the spread. The order preview checks margin and fees." : "Sizes this order so your whole position ends at the chosen leverage against your mark equity, accounting for the spread. On the opposite side it reduces toward that leverage and never flips your position. The order preview checks margin and fees."} Limits adjust with price readiness and risk.</p>}
             </div>
           </details>
         </div>
 
-        <label className="label flex items-center gap-2 text-fg-2">
-          <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-            <input
-              type="checkbox"
-              checked={reduceOnly}
-              disabled={archived}
-              onChange={(e) => { setReduceOnly(e.target.checked); setTargetLeverage(undefined); }}
-              className="peer absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none border border-line-strong bg-ground checked:bg-action"
-            />
-            <Check size={11} strokeWidth={3} className="pointer-events-none relative hidden text-on-action peer-checked:block" aria-hidden />
-          </span>
-          Reduce only
-        </label>
-
-        <details className="text-xs text-fg-2">
-          <summary className="label cursor-pointer">Advanced order</summary>
-          <label className="mt-3 flex flex-col gap-1.5">Expires at block (optional)<input className={field} inputMode="numeric" placeholder="Good until cancelled" value={expiry} {...validation.props("expiry")} onChange={(e) => setExpiry(e.target.value)} /><FieldError id={validation.errorId("expiry")}>{validation.message("expiry")}</FieldError></label>
-          {preview.data && <dl className="mt-2"><Row k="Required initial margin" v={preview.data.fullBackingRequired ? "Fully backed" : qToMoney(preview.data.requiredImQ).usdc} /><Row k="Equity after reservations" v={preview.data.id.markAvailable ? qToMoney(preview.data.eMinQ).usdc : "No mark"} /><Row k="Deficit if NO / YES" v={`${qToMoney(preview.data.d0AfterQ).usdc} / ${qToMoney(preview.data.d1AfterQ).usdc}`} /><Row k="Reserve coverage" v={preview.data.marketCoverageAfter ? "Covered" : "Unavailable"} /></dl>}
-        </details>
         </div>
         </div>
 
         <OrderSummary engine={engine} owner={owner.address} market={market} trader={trader} tradeIntent={tradeIntent}
           order={parsed.ok ? { tick: parsed.tick, lots: parsed.lots, isBuy: side === "buy", reduceOnly } : undefined}
           feeCapQ={preview.data?.rejection === 0 ? preview.data.feeCapQ : undefined} admittedLots={preview.data?.acceptedCapLots} unavailable={readUnavailable} />
+        {preview.data && <details className="text-xs text-fg-3">
+          <summary className="cursor-pointer py-1 hover:text-fg">Margin and reserve</summary>
+          {preview.data && <dl className="mt-2"><Row k="Required initial margin" v={preview.data.fullBackingRequired ? "Fully backed" : qToMoney(preview.data.requiredImQ).usdc} /><Row k="Equity after reservations" v={preview.data.id.markAvailable ? qToMoney(preview.data.eMinQ).usdc : "No mark"} /><Row k="Deficit if NO / YES" v={`${qToMoney(preview.data.d0AfterQ).usdc} / ${qToMoney(preview.data.d1AfterQ).usdc}`} /><Row k="Reserve coverage" v={preview.data.marketCoverageAfter ? "Covered" : "Unavailable"} /></dl>}
+        </details>}
 
         {delegated && <label className="flex items-start gap-2 text-xs text-fg-2"><input type="checkbox" checked={oneClick} onChange={(e) => setOneClick(e.target.checked)} />Use Privy one-click trading for this order</label>}
         {tx.recovery && <div className="border border-line p-3 text-xs text-fg-2">
@@ -341,7 +456,7 @@ export function Ticket({ engine, market, trader, intent, bookPrice, readUnavaila
           </Button>
         ) : (
           <Button variant={side === "buy" ? "bid" : "ask"} size="lg" arrow disabled={!!blocker || tx.state.status === "pending" || tx.state.status === "sent"} onClick={submit}>
-            {blocker ?? (tx.state.status === "pending" || tx.state.status === "sent" ? tx.state.step : closing ? "Close position" : intentLabel(tradeIntent))}
+            {blocker ?? (tx.state.status === "pending" || tx.state.status === "sent" ? tx.state.step : closing ? "Close position" : shortfall > 0n ? `${intentLabel(tradeIntent)} · add ${atomsToUsdc(shortfall)} ${symbol}` : intentLabel(tradeIntent))}
           </Button>
         )}
         {closing && owner.address && !owner.wrongChain && <p className="text-xs leading-relaxed text-fg-3">

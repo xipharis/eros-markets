@@ -40,7 +40,7 @@
   background: var(--color-line);
 }
 .workspace > * { min-width: 0; background: var(--color-ground); }
-.chart { grid-area: chart; display: flex; min-height: 24rem; }
+.chart { grid-area: chart; display: flex; min-height: 20rem; }
 .chart > * { flex: 1; }
 .trade { grid-area: trade; display: flex; flex-direction: column; }
 .trade > :first-child { height: auto; }
@@ -67,35 +67,27 @@
 @media (min-width: 768px) {
   .workspace {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: "chart chart" "trade trade" "book trades" "book account" "activity activity";
+    grid-template-areas: "chart chart" "trade trade" "book trades" "account account" "activity activity";
   }
   .chart { min-height: 27rem; }
   .deadlineList { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-/* Exchange layout: book down the left, chart over the order form, trades and balances on the right. */
+/* Chart beside the order form first; the book, trades and details sit below the chart. */
 @media (min-width: 1024px) {
   .workspace {
-    grid-template-columns: 280px minmax(0, 1fr);
-    grid-template-areas: "book chart" "book trade" "trades account" "activity activity";
-    grid-template-rows: minmax(26rem, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 340px;
+    grid-template-areas: "chart chart trade" "book trades account" "activity activity activity";
+    grid-template-rows: minmax(30rem, auto) minmax(0, 26rem) auto;
   }
-  .book { max-height: none; }
-  .chart { min-height: 26rem; }
+  .chart { min-height: 30rem; }
+  .book { max-height: 26rem; overflow: auto; }
+  .trades { max-height: 26rem; }
   .activityContent { min-height: 10rem; }
 }
 
-@media (min-width: 1280px) {
-  .workspace {
-    grid-template-columns: 300px minmax(0, 1fr) 300px;
-    grid-template-areas: "book chart trades" "book trade account" "activity activity activity";
-    grid-template-rows: minmax(28rem, 1fr) auto auto;
-  }
-  .trades { max-height: none; }
-}
-
 @media (min-width: 1600px) {
-  .workspace { grid-template-columns: 340px minmax(0, 1fr) 340px; }
+  .workspace { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 380px; }
 }
 
 /* Spot (YES/NO tokens): outcome chart beside the order ticket, then book, trades and balances. */

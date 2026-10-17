@@ -127,7 +127,7 @@ export function Terminal({ manifest }: { manifest: MarketManifest }) {
       </div>
 
       <aside ref={ticketRef} tabIndex={-1} className={styles.trade} aria-label="Trade">
-        <Ticket key={owner.address ?? "disconnected"} engine={manifest.engine} market={actionMarket} trader={trader} intent={intent} bookPrice={bookPrice} readUnavailable={readUnavailable} />
+        <Ticket key={owner.address ?? "disconnected"} engine={manifest.engine} market={actionMarket} trader={trader} intent={intent} bookPrice={bookPrice} levels={ladder.isError ? undefined : ladder.data} readUnavailable={readUnavailable} />
       </aside>
 
       <div className={styles.trades}>

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Address } from "viem";
+import type { Address, Hash, Hex } from "viem";
 import type { WalletSnapshot } from "@/lib/wallet-safety";
 export type { WalletSnapshot } from "@/lib/wallet-safety";
 
@@ -16,6 +16,10 @@ type WalletSession = {
   open: () => void;
   logout: () => Promise<void>;
   getSnapshot: () => WalletSnapshot;
+  /** Instant trading: the selected embedded wallet signs allowlisted calls without Privy's confirmation screen. */
+  instant: boolean;
+  setInstant: (on: boolean) => void;
+  sendInstant?: (tx: { to: Address; data: Hex; gas: bigint }) => Promise<Hash>;
 };
 
 // Public market reads still work when Privy has not been configured.
@@ -29,6 +33,8 @@ export const unavailableWalletSession: WalletSession = {
   open: () => {},
   logout: async () => {},
   getSnapshot: () => ({ ready: false, version: 0 }),
+  instant: false,
+  setInstant: () => {},
 };
 export const WalletSessionContext = createContext<WalletSession>(unavailableWalletSession);
 

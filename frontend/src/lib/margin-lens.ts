@@ -21,3 +21,8 @@ export async function marginBoundaries(cash: bigint, lots: bigint, markTick: num
   return { block, mm: nearest(3), im: nearest(2) };
   });
 }
+
+/** Initial and maintenance margin the kernel charges for a hypothetical new position. */
+export function sideMarginAt(lots: bigint, isLong: boolean, tick: number, secsToT: bigint, now: bigint, profile: RiskParams, block: bigint) {
+  return canonicalRead(block, () => client.readContract({ code: marginLensCode, abi: marginLensAbi, functionName: "sideMargin", args: [lots, isLong, BigInt(tick) * 10n ** 15n, secsToT, now, profile], blockNumber: block }));
+}

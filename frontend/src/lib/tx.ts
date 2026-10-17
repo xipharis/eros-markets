@@ -24,6 +24,7 @@ import { markets } from "@/config/deployment";
 import { DelegatedAttemptStore, assertAttemptBinding, confirmDelegatedAttempt, delegatedCall, recoverDelegatedAttempt, type DelegatedAttempt } from "./delegated-attempt";
 import { validateIntent } from "./delegated-intent";
 import { revertMessage } from "./transaction-errors";
+import { instantAllowed } from "./instant-calls";
 export { revertMessage } from "./transaction-errors";
 
 type TxPhase = "preflight" | "signature" | "confirmation" | "post-confirmation";
@@ -44,7 +45,7 @@ const attempts = () => new DelegatedAttemptStore(window.sessionStorage, delegate
 export function useTx() {
   const config = useConfig();
   const qc = useQueryClient();
-  const { getSnapshot } = useWalletSession();
+  const { getSnapshot, sendInstant } = useWalletSession();
   const running = useRef(false);
   const [result, setResult] = useState<{ scope: string; state: TxState }>({ scope: "", state: { status: "idle" } });
   const current = getSnapshot();
@@ -140,6 +141,9 @@ export function useTx() {
                 connectorUid: guard.initial.connectorUid!, sessionVersion: guard.initial.version, createdAt: Date.now() };
             }
             hash = await recoverDelegatedAttempt(store!, attempt, body => privyRequest<{ hash: Hash }>("/api/trade", body, guard.assertCurrent));
+          } else if (sendInstant && instantAllowed(c)) {
+            setState({ status: "pending", step: `Signing ${c.label}` });
+            hash = await sendInstant({ to: c.address, data: encodeFunctionData({ abi: c.abi, functionName: c.functionName, args: c.args ?? [] }), gas });
           } else hash = await writeContract(config, { ...request, account, connector, chainId: chain.id, gas } as never);
           last = hash;
           currentHash = hash;

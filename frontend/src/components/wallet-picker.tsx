@@ -1,14 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { getEmbeddedConnectedWallet, useCreateWallet, useLinkAccount, useLogin, usePrivy, useWallets, type ConnectedWallet } from "@privy-io/react-auth";
+import { getEmbeddedConnectedWallet, useCreateWallet, useLinkAccount, useLogin, usePrivy, useSendTransaction, useWallets, type ConnectedWallet } from "@privy-io/react-auth";
 import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useConfig, useConnection } from "wagmi";
 import { disconnect, getConnection, getConnections, switchChain } from "wagmi/actions";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Address, Hex } from "viem";
 import { chain } from "@/config/chain";
 import { WalletSessionContext, type WalletSnapshot } from "./wallet-session";
 import { WalletDialog } from "./wallet-dialog";
+
+const instantKey = (address: string) => `eros:instant-off:${address.toLowerCase()}`;
+function readInstantOff(address?: string) {
+  if (!address) return false;
+  try { return localStorage.getItem(instantKey(address)) === "1"; } catch { return false; }
+}
 
 function message(e: unknown) {
   return e instanceof Error ? e.message : String(e);
@@ -24,6 +31,8 @@ export function WalletPickerProvider({ children }: { children: ReactNode }) {
   const config = useConfig();
   const connection = useConnection();
   const qc = useQueryClient();
+  const { sendTransaction } = useSendTransaction();
+  const [instantOff, setInstantOff] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -136,9 +145,24 @@ export function WalletPickerProvider({ children }: { children: ReactNode }) {
     finally { setBusy(false); }
   }
 
+  const embedded = wallets.some((w) => w.address.toLowerCase() === snapshot.address?.toLowerCase() && ["privy", "privy-v2"].includes(w.walletClientType));
+  const selected = snapshot.ready ? snapshot.address : undefined;
+  // On by default for embedded wallets; the choice is remembered per address on this device.
+  const instant = embedded && !!selected && !(instantOff[selected.toLowerCase()] ?? readInstantOff(selected));
+  function setInstant(on: boolean) {
+    if (!selected) return;
+    try { if (on) localStorage.removeItem(instantKey(selected)); else localStorage.setItem(instantKey(selected), "1"); } catch { /* Kept for this page session. */ }
+    setInstantOff((all) => ({ ...all, [selected.toLowerCase()]: !on }));
+  }
+  const sendInstant = instant && selected ? async ({ to, data, gas }: { to: Address; data: Hex; gas: bigint }) => {
+    const { hash } = await sendTransaction({ from: selected, to, data, value: 0, chainId: chain.id, gasLimit: gas },
+      { address: selected, uiOptions: { showWalletUIs: false } });
+    return hash;
+  } : undefined;
+
   return (
-    <WalletSessionContext.Provider value={{ configured: true, ready, authenticated, busy, embedded: wallets.some((w) => w.address.toLowerCase() === snapshot.address?.toLowerCase() && ["privy", "privy-v2"].includes(w.walletClientType)),
-      address: snapshot.ready ? snapshot.address : undefined, error, open, logout, getSnapshot }}>
+    <WalletSessionContext.Provider value={{ configured: true, ready, authenticated, busy, embedded,
+      address: selected, error, open, logout, getSnapshot, instant, setInstant, sendInstant }}>
       {children}
       <WalletDialog dialogRef={dialog} wallets={wallets} activeAddress={connection.address}
         hasEmbedded={!!getEmbeddedConnectedWallet(wallets) || !!user?.linkedAccounts.some((a) => a.type === "wallet" && a.chainType === "ethereum" && (a.walletClientType === "privy" || a.walletClientType === "privy-v2"))}

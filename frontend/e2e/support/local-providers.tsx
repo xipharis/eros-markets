@@ -19,7 +19,7 @@ function Session({ children }: { children: ReactNode }) {
     connectorUid: current.connector?.uid, ready: current.isConnected, version: version.current }; }, [config]);
   async function open() { try { if (location.hostname !== "127.0.0.1" && location.hostname !== "localhost") throw new Error("Local test host required"); await connectAsync({ connector: config.connectors[0], chainId: 31337 }); } catch (e) { setError((e as Error).message); } }
   return <WalletSessionContext.Provider value={{ embedded: false, configured: true, ready: true, authenticated: c.isConnected, busy: false,
-    address: c.address, error, getSnapshot, open: () => { void open(); }, logout: async () => { version.current++; await disconnect(config); } }}>
+    address: c.address, error, getSnapshot, instant: false, setInstant: () => {}, open: () => { void open(); }, logout: async () => { version.current++; await disconnect(config); } }}>
     <div role="status" className="bg-signal px-4 py-2 text-sm text-on-signal">LOCAL E2E FIXTURE · Chain 31337 · Disposable wallets · Synthetic data</div>
     {children}
   </WalletSessionContext.Provider>;
