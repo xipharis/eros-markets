@@ -326,11 +326,45 @@
   animation: marquee 40s linear infinite;
 }
 
+/* Warming-up notice: each phrase rises in; the signal square breathes while data loads. */
+@keyframes warming-phrase {
+  from {
+    transform: translateY(35%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.warming-phrase {
+  display: inline-block;
+  animation: warming-phrase 260ms var(--ease-out-expo);
+}
+/* Market board: each 24h price line draws itself once, left to right. */
+@keyframes trace-draw {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+.trace-draw {
+  animation: trace-draw 900ms var(--ease-out-expo) both;
+}
+@keyframes warming-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.warming-pulse {
+  animation: warming-pulse 1.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0s !important; }
   .ui-button:not(:disabled):hover, .ui-button:not(:disabled):active,
   .ui-toggle:not(:disabled):hover, .ui-toggle:not(:disabled):active { transform: none; }
   .digit-new,
+  .warming-phrase,
+  .warming-pulse,
+  .trace-draw,
   .caret::after,
   .marquee,
   .ui-arrow svg {

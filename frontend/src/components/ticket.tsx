@@ -14,6 +14,7 @@ import { orderPreviewCurrent, orderPreviewOptions } from "@/lib/order-preview";
 import { canonicalTrade, displayTickForOutcome, type TradeIntent } from "@/lib/trade-view";
 import { useMaxOrder } from "@/lib/use-max-order";
 import { OrderSummary } from "./order-summary";
+import { WarmingUp } from "./warming-up";
 import { verifiedProfile } from "@/lib/capabilities";
 import { sideMarginAt } from "@/lib/margin-lens";
 import { requiredCollateralQ, qToAtomsCeil } from "@/lib/required-collateral";
@@ -24,7 +25,7 @@ import { qToMoney } from "@/lib/units";
 import { REJECT, ORDER_KIND } from "@/lib/enums";
 import { useTx, summarizeOrder } from "@/lib/tx";
 import { lotsToClaims, parseClaimsToLots, parsePriceToTick } from "@/lib/units";
-import { FieldError, useFieldErrors, ReadError } from "./feedback";
+import { FieldError, useFieldErrors } from "./feedback";
 import { TxFeedback } from "./tx-feedback";
 import { Check, ChevronDown } from "lucide-react";
 import { useLoginAction, useOwner } from "./wallet";
@@ -234,6 +235,10 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
       setClampNote(`${x}× would be ${lotsToClaims(want)} claims; the engine admits up to ${lotsToClaims(max)} at this price (margin rises with size).`);
     });
   }, [targetLeverage, inputRevision]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Nothing tradable to show yet: data still loading, reads down, or the market waking up.
+  const warming = !archived && (!market || readUnavailable || preview.isError || margin.isError || (owner.connected && !trader)
+    || (!market.halted && (!market.active || market.risk.accountingState !== 0 || !market.risk.indexAvailable)));
 
   const closing = !!intent?.full && reduceOnly && size === intent.size && price === intent.price && side === intent.side;
 
@@ -446,6 +451,7 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
           {tx.recovery.body.action === "placeOrder" && <p className="mt-1">{tx.recovery.body.place.isBuy ? "Buy YES" : "Sell YES"} · {lotsToClaims(BigInt(tx.recovery.body.place.size))} claims at YES {(tx.recovery.body.place.tick / 1000).toFixed(3)}</p>}
           <Button className="mt-2" disabled={owner.wrongChain || tx.state.status === "pending" || tx.state.status === "sent"} onClick={() => owner.address && tx.recover(owner.address)}>Recover previous request</Button>
         </div>}
+        {warming && <WarmingUp compact className="rounded-md bg-panel px-3 py-3" />}
         {!owner.connected ? (
           <Button variant="primary" size="lg" arrow disabled={!loginAction.ready} onClick={() => loginAction.login()}>
             Log in to trade
@@ -463,7 +469,7 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
           When the close fills completely, your remaining collateral is returned to your wallet (two more confirmations). A partial fill keeps the rest of the position open.
         </p>}
 
-        {preview.isError && <ReadError message="Order preview unavailable. Check your connection and retry." retry={() => { void preview.refetch(); }} />}
+        {preview.isError && <button type="button" className="self-start text-xs text-fg-3 underline hover:text-fg" onClick={() => { void preview.refetch(); }}>Check the order again</button>}
         {owner.wrongChain && chainError && <p role="alert" className="text-xs text-ask">Network switch was not completed. Unlock your wallet and try again.</p>}
         {preview.data && preview.data.rejection !== 0 && parsed.ok && <p role="status" className="text-xs leading-relaxed text-ask">{REJECT[preview.data.rejection] || "This order cannot be admitted. Review your price, size, and collateral."}</p>}
         <TxFeedback state={tx.state} />

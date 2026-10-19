@@ -1,5 +1,7 @@
 "use client";
 
+import { WarmingUp } from "./warming-up";
+
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Point } from "@/lib/reads";
 import { priceBridges, priceSegments } from "@/lib/price-chart";
@@ -19,6 +21,8 @@ type Props = {
   indexUnit?: number;
   emptyTitle: string;
   emptyReason: string;
+  /** No price yet for a live market: show the rotating warming-up notice instead of the title. */
+  warming?: boolean;
   historyStatus: string;
   readError?: boolean;
   /** Price source label, e.g. "Polymarket" or "Eros native (Kuru)". */
@@ -126,7 +130,7 @@ export function PriceAxis(p: Props) {
             {hovered && <g><line x1={x(hovered.t)} x2={x(hovered.t)} y1={top} y2={bottom} stroke="var(--color-fg-4)" strokeDasharray="3 3" /><line x1={left} x2={right} y1={y(hovered.v)} y2={y(hovered.v)} stroke="var(--color-fg-4)" strokeDasharray="3 3" /><circle cx={x(hovered.t)} cy={y(hovered.v)} r={5} fill="var(--color-signal)" stroke="var(--color-ground)" strokeWidth={2} /></g>}
           </g>
         </svg>}
-        {!last && <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6"><div className="max-w-xs bg-ground/90 px-4 py-3 text-center"><p className="text-sm font-medium">{p.emptyTitle}</p><p className="mt-1 text-xs text-fg-3">{p.emptyReason}</p></div></div>}
+        {!last && <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6"><div className="max-w-xs bg-ground/90 px-4 py-3 text-center">{p.warming ? <WarmingUp /> : <><p className="text-sm font-medium">{p.emptyTitle}</p><p className="mt-1 text-xs text-fg-3">{p.emptyReason}</p></>}</div></div>}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-3 border-t border-line px-3 text-2xs text-fg-3">
         <span title={p.historyStatus}>{hovered ? new Date(hovered.t * 1000).toLocaleString() : last ? `Updated ${timeLabel(last.t, true)}` : "No observations yet"}</span>

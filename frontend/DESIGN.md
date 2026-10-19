@@ -265,6 +265,7 @@ Blunt, labelled blocks; the primary action is a two-part object.
 ### Chips
 - **Style:** a 24px uppercase label in a 1px outline of its tone colour, on the ground: Black outline for neutral and warning, Signal outline with Light Signal text, side colours for bid/ask, Inner Rule outline with fg-3 text when muted.
 - **State:** chips are status, not controls; they carry no hover.
+- **Index tones:** on index surfaces a Trading chip takes the Signal tone, led by an 8px breathing Signal square; paused, waiting, halted and settled chips take the muted tone, so live and not-live read apart at a glance.
 
 ### Cards / Containers
 - **Corner Style:** 12px.
@@ -294,6 +295,19 @@ The chart and the order book share one probability axis (0.00 to 1.00, Inner Rul
 
 ### Unavailable Mark
 A 10px outlined square (fg-3, or Signal for the mark price) followed by a short reason such as "no mark" or "book empty", with the full reason on hover. It replaces any number the contract cannot yet supply.
+
+At headline scale (a card's missing odds), the mark grows to a 16px outlined Signal square beside "No live price" in headline type, with the reason below in fg-3 data text. It never falls back to 0 or a dash at display size.
+
+### Question Card
+The repeated unit of the markets board: one card per question, its spot and perp venues together.
+- **Head:** a ruled 40px panel head with the category and its status chip (see Chips, index tones).
+- **Body:** the question in headline type (1.25rem, 1.5rem from sm), then a "Resolves in" label with the countdown as a 600-weight tabular value. The YES odds sit at display scale with flipping digits and a smaller fg-2 percent sign; beneath, a `YES` label, the price source and the 24h move.
+- **24h price trace:** a real price line in a 1.5px Signal stroke between two dashed Inner Rule guides, its high and low labelled on the right in tabular fg-3; a flat series is drawn centred and labelled "flat · 24h". It draws in once, left to right (clip reveal, 900ms, ease-out-expo). With no history, a plain fg-3 line says why.
+- **Stats strip:** three Raised Black cells on a 1px Inner Rule gutter (6px corners), label over tabular value; below sm they reflow to label-left, value-right rows.
+- **Footer:** cells divided by an Inner Rule, under a Frame Grey rule. The primary is the Signal arrow square joined to the label block (label plus a one-line note). Secondary routes are Raised Black blocks, label plus note, with a trailing fg-2 arrow that nudges right on hover.
+
+### Warming-Up Notice
+Shown wherever trading data has not arrived (chart, book, ticket, board cards). One short phrase replaces the last every second, rising in over 260ms beside a breathing 8px Signal square (1.2s), above a steady fg-3 note. Screen readers get one stable status line; the rotation is visual only. Compact size steps text down to data and caption. All motion stops under reduced motion.
 
 ### Live Terminal and Ticker
 An inverted Black panel types the market's real chain state line by line behind a blinking block caret. A framed marquee of live values crawls across the page, cells divided by Black rules. Both stop under reduced motion.

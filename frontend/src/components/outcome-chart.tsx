@@ -1,5 +1,7 @@
 "use client";
 
+import { WarmingUp } from "./warming-up";
+
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Point } from "@/lib/reads";
 import { priceBridges, priceSegments } from "@/lib/price-chart";
@@ -19,6 +21,8 @@ type Props = {
   volume?: string;
   emptyTitle: string;
   emptyReason: string;
+  /** No price yet for a live market: show the rotating warming-up notice instead of the title. */
+  warming?: boolean;
   readError?: boolean;
   /** Trade-priced series: the last price stands until the next trade, so the lines run flat to now. */
   holdLast?: boolean;
@@ -145,7 +149,7 @@ export function OutcomeChart(p: Props) {
               <text x={Math.min(x(shown.t), right) + 12} y={ly + big * 0.42} fontSize={big} fontWeight={700} fill={`var(--color-${o})`}>{pct(v)}</text>
             </g>)}
         </svg>}
-        {!last && <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6"><div className="max-w-xs bg-ground/90 px-4 py-3 text-center"><p className="text-sm font-medium">{p.emptyTitle}</p><p className="mt-1 text-xs text-fg-3">{p.emptyReason}</p></div></div>}
+        {!last && <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6"><div className="max-w-xs bg-ground/90 px-4 py-3 text-center">{p.warming ? <WarmingUp /> : <><p className="text-sm font-medium">{p.emptyTitle}</p><p className="mt-1 text-xs text-fg-3">{p.emptyReason}</p></>}</div></div>}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-3 px-4 pb-2 text-2xs text-fg-3">
         <span>{hovered ? new Date(hovered.t * 1000).toLocaleString() : last ? `${p.holdLast ? "Last trade" : "Updated"} ${new Date((p.yes.filter(v => v.valid !== false).at(-1)?.t ?? last.t) * 1000).toLocaleTimeString()}` : "No prices yet"}</span>

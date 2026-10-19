@@ -123,7 +123,7 @@ export function Terminal({ manifest }: { manifest: MarketManifest }) {
           markUnit={md?.risk.markAvailable ? wadToUnit(md.risk.markWad) : undefined}
           indexUnit={md?.risk.indexAvailable ? wadToUnit(md.risk.indexWad) : undefined}
           emptyTitle={!md ? "Loading market" : manifest.archived ? "Market archived" : !md.active ? "Trading has not opened" : "Waiting for price"}
-          emptyReason={emptyReason} historyStatus={live.historyStatus} readError={!!live.error || publicUnavailable} source={manifest.source} />
+          emptyReason={emptyReason} warming={!manifest.archived} historyStatus={live.historyStatus} readError={!!live.error || publicUnavailable} source={manifest.source} />
       </div>
 
       <aside ref={ticketRef} tabIndex={-1} className={styles.trade} aria-label="Trade">
@@ -143,6 +143,7 @@ export function Terminal({ manifest }: { manifest: MarketManifest }) {
         aria-busy={!publicUnavailable && !ladder.isError && (!md || !ladder.data)}>
         <OrderBook levels={ladder.isError ? [] : ladder.data ?? []} bestBid={md?.bestBid ?? 0} bestAsk={md?.bestAsk ?? 0} last={last}
           emptyReason={ladder.isError || publicUnavailable ? "Book unavailable" : !md || (!ladder.data && !!(md.bestBid || md.bestAsk)) ? "Loading book…" : "No resting orders"}
+          warming={ladder.isError || publicUnavailable || !md || (!ladder.data && !!(md.bestBid || md.bestAsk)) || (!manifest.archived && !md.halted && (!md.active || !md.risk.indexAvailable))}
           onPrice={tick => setBookPrice({ tick, nonce: Date.now() })} />
       </div>
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { WarmingUp } from "./warming-up";
+
 import { useEffect, useId, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
@@ -101,7 +103,7 @@ function KuruBook({ s, error, outcome, onOutcome, onPrice, symbols }: { s?: Spot
       <div className="flex gap-1">{(["yes", "no"] as const).map((o) => <button key={o} type="button" aria-pressed={outcome === o} onClick={() => onOutcome(o)}
         className={cx("min-h-7 border px-2 text-2xs font-semibold", outcome === o ? "border-fg bg-fg text-ground" : "border-line text-fg-3 hover:text-fg")}>{o.toUpperCase()}</button>)}</div></div>
     <div className="grid grid-cols-3 px-3 py-1.5 text-2xs text-fg-3"><span>Price</span><span className="text-right">{outcome === "yes" ? symbols.yes : symbols.no}</span><span className="text-right">Total</span></div>
-    {!l2 ? <p className={cx("p-3 text-xs", error ? "text-ask" : "text-fg-3")}>{error ? "Kuru book unavailable; retrying." : "Reading Kuru…"}</p> : <div className="flex min-h-0 flex-1 flex-col justify-center overflow-auto">
+    {!l2 ? <div className="flex flex-1 items-center justify-center p-4"><WarmingUp compact /></div> : <div className="flex min-h-0 flex-1 flex-col justify-center overflow-auto">
       <div className="flex flex-col justify-end">{l2.asks.length ? rows(l2.asks, "ask") : <p className="px-3 py-2 text-xs text-fg-3">No asks</p>}</div>
       <p className="border-y border-line px-3 py-1.5 text-2xs text-fg-3 tnum">Spread {spread !== undefined ? tickToPrice(spread) : "—"}</p>
       <div>{l2.bids.length ? rows(l2.bids, "bid") : <p className="px-3 py-2 text-xs text-fg-3">No bids</p>}</div>
@@ -354,7 +356,7 @@ export function SpotWorkspace({ manifest, halted, spot, trades, live }: { manife
   const volume = useMemo(() => trades.data ? `${atomsToUsdc((trades.data.trades).reduce((sum, t) => sum + BigInt(t.lots) * BigInt(t.tick), 0n))} ${deployment.risk.collateralSymbol}` : undefined, [trades.data]);
   return <div className={cx(styles.workspace, styles.spot)}>
     <div className={styles.chart}>
-      <OutcomeChart yes={index} yesLabel={b.yesSymbol} noLabel={b.noSymbol} volume={volume} emptyTitle="Waiting for price"
+      <OutcomeChart yes={index} yesLabel={b.yesSymbol} noLabel={b.noSymbol} volume={volume} warming={!halted} emptyTitle="Waiting for price"
         emptyReason={b.spotOnly ? "The chart shows prices of Kuru fills; it starts with the first trade." : "The YES price is published from the Kuru book every minute."}
         readError={b.spotOnly ? trades.isError : !!live.error} holdLast={b.spotOnly} />
     </div>

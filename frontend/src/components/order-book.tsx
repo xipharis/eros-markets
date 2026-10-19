@@ -1,5 +1,7 @@
 "use client";
 
+import { WarmingUp } from "./warming-up";
+
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { Level } from "@/lib/reads";
@@ -17,11 +19,11 @@ function ViewIcon({ view }: { view: View }) {
   return <span className="grid h-3.5 w-3.5 grid-rows-2 gap-[2px]" aria-hidden><span className={cx("rounded-[1px]", top)} /><span className={cx("rounded-[1px]", bottom)} /></span>;
 }
 
-export function OrderBook({ levels, bestBid, bestAsk, last, emptyReason, onPrice }: {
+export function OrderBook({ levels, bestBid, bestAsk, last, emptyReason, warming = false, onPrice }: {
   levels: Level[]; bestBid: number; bestAsk: number;
   /** Latest trade (or the mark when no trade is known) and its move against the previous trade. */
   last?: { tick: number; move: number; label: string };
-  emptyReason: string; onPrice: (tick: number) => void;
+  emptyReason: string; warming?: boolean; onPrice: (tick: number) => void;
 }) {
   const [view, setView] = useState<View>("both");
   const depth = view === "both" ? 10 : 20;
@@ -66,7 +68,8 @@ export function OrderBook({ levels, bestBid, bestAsk, last, emptyReason, onPrice
         <span className="text-2xs text-fg-3">Spread <span className="tnum text-fg">{bestBid && bestAsk ? tickToPrice(bestAsk - bestBid) : "—"}</span></span>
       </div>
       {view !== "asks" && rows(bids, true)}
-    </> : <p className="flex min-h-72 flex-1 items-center justify-center px-4 text-center text-xs text-fg-3">{emptyReason}</p>}
+    </> : warming ? <div className="flex min-h-72 flex-1 items-center justify-center px-4"><WarmingUp compact /></div>
+      : <p className="flex min-h-72 flex-1 items-center justify-center px-4 text-center text-xs text-fg-3">{emptyReason}</p>}
     {both > 0n && <div className="flex items-center gap-2 border-t border-line px-3 py-2 text-2xs tnum" title="Share of displayed resting depth on each side">
       <span className="text-bid">B {bidShare.toFixed(1)}%</span>
       <span className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-ask/80" aria-hidden><span className="h-full rounded-full bg-bid" style={{ width: `${bidShare}%` }} /></span>
