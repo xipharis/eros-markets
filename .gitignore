@@ -18,3 +18,9 @@ secrets.md
 
 # Runtime journal archives (multi-hundred-MB; never commit)
 *.tgz
+
+# Local checkouts and tool state, never tracked in this fork
+contracts/lib/
+oracle/lib/
+frontend/.vercel/
+frontend/.impeccable/questions/
