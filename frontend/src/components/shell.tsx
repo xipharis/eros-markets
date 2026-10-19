@@ -8,6 +8,7 @@ import { cx } from "./ui";
 import { BrandImage } from "./brand-image";
 
 const NAV = [
+  { href: "/start", label: "Start" },
   { href: "/markets", label: "Markets", match: "/m/" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/resolution", label: "Resolution" },
@@ -41,7 +42,7 @@ export function TopBar() {
           <BrandImage className="w-full" />
         </Link>
         <nav
-          className="flex h-full items-stretch max-md:col-span-2 max-md:row-start-2 max-md:-mx-3 max-md:mt-1 max-md:grid max-md:h-10 max-md:w-[calc(100%+1.5rem)] max-md:grid-cols-3 max-md:shadow-[inset_0_1px_0_var(--color-line-strong)] md:justify-self-center"
+          className="flex h-full items-stretch max-md:col-span-2 max-md:row-start-2 max-md:-mx-3 max-md:mt-1 max-md:grid max-md:h-10 max-md:w-[calc(100%+1.5rem)] max-md:grid-cols-4 max-md:shadow-[inset_0_1px_0_var(--color-line-strong)] md:justify-self-center"
           aria-label="Primary"
         >
           {NAV.map((n) => {

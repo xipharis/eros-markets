@@ -265,6 +265,7 @@ export function MarketsIndex() {
             <span><span className="text-fg">{questions.length}</span> {questions.length === 1 ? "question" : "questions"}</span>
             <span className="flex items-center gap-1.5">{tradingCount > 0 && <span className="warming-pulse h-1.5 w-1.5 rounded-sm bg-signal" aria-hidden />}<span className="text-fg">{tradingCount}</span> trading now</span>
             {block !== undefined && <span>Block {block.toLocaleString("en-US")}</span>}
+            <Link href="/start" className="inline-flex items-center gap-1 text-fg-2 underline decoration-line-strong underline-offset-4 hover:text-fg">New here? Start in five steps <ArrowRight size={12} aria-hidden /></Link>
           </p>
         </div>
         <div role="search" aria-label="Find a market" className="w-full sm:w-auto sm:min-w-80">

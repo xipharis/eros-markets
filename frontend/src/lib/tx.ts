@@ -25,6 +25,7 @@ import { DelegatedAttemptStore, assertAttemptBinding, confirmDelegatedAttempt, d
 import { validateIntent } from "./delegated-intent";
 import { revertMessage } from "./transaction-errors";
 import { instantAllowed } from "./instant-calls";
+import { ledgerFlow, recordFlow } from "./money-ledger";
 export { revertMessage } from "./transaction-errors";
 
 type TxPhase = "preflight" | "signature" | "confirmation" | "post-confirmation";
@@ -158,6 +159,9 @@ export function useTx() {
           // Keep successful calls separate from any later simulation, signing or receipt failure.
           completed.push({ hash, label: c.label });
           currentHash = undefined;
+          // Remember collateral moved into or out of a market, so the money panel can show profit and loss.
+          const flow = ledgerFlow(c);
+          if (flow) { recordFlow(window.localStorage, chain.id, flow.engine, account, flow.atoms, Date.now()); window.dispatchEvent(new Event("eros:ledger")); }
           phase = "post-confirmation";
           const orders = parseEventLogs({ abi: engineAbi, eventName: "OrderPlaced", logs: receipt.logs.filter((l) => l.address.toLowerCase() === c.address.toLowerCase()) });
           rememberOrders(chain.id, c.address, account, orders.map((l) => l.args.id));

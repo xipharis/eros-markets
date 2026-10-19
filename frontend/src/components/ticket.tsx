@@ -15,6 +15,7 @@ import { canonicalTrade, displayTickForOutcome, type TradeIntent } from "@/lib/t
 import { useMaxOrder } from "@/lib/use-max-order";
 import { OrderSummary } from "./order-summary";
 import { WarmingUp } from "./warming-up";
+import { useWalletSession } from "./wallet-session";
 import { verifiedProfile } from "@/lib/capabilities";
 import { sideMarginAt } from "@/lib/margin-lens";
 import { requiredCollateralQ, qToAtomsCeil } from "@/lib/required-collateral";
@@ -178,6 +179,13 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
   const fundable = !!trader && trader.wallet + trader.free >= shortfall;
   const fundingBlocked = shortfall > 0n && market ? allocationBlocker(market) : undefined;
   const symbol = trader?.assets.symbol ?? "tUSDC";
+  const session = useWalletSession();
+  // The funding steps this order adds, and the user's acknowledgement of exactly this amount.
+  let fundingSteps: ReturnType<typeof fundingPlan> | undefined;
+  try { if (shortfall > 0n && trader) fundingSteps = fundingPlan(shortfall, trader.free, trader.wallet, trader.allowance); } catch { /* Shown as a wallet shortfall. */ }
+  const [ack, setAck] = useState<string>();
+  const ackKey = `${engine}:${shortfall}:${sizeLots}:${openLeverage}`;
+  const acknowledged = ack === ackKey;
   const maximum = useMaxOrder({ engine, owner: owner.address, market, trader, tick: priceTick,
     isBuy: side === "buy", reduceOnly, unavailable: readUnavailable, inputRevision });
 
@@ -208,8 +216,9 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
                 ? parsed.error || "Enter price and size"
                 : expiryError ? expiryError
                 : fresh && requiredAtoms === undefined ? (margin.isError ? "Margin estimate unavailable" : "Checking collateral…")
-                : shortfall > 0n && !fundable ? `Needs ${atomsToUsdc(shortfall)} ${symbol} · wallet has ${atomsToUsdc(trader!.wallet + trader!.free)}`
+                : shortfall > 0n && trader && !fundable ? `Needs ${atomsToUsdc(shortfall)} ${symbol} · wallet has ${atomsToUsdc(trader.wallet + trader.free)}`
                 : fundingBlocked ? fundingBlocked
+                : shortfall > 0n && !acknowledged ? "Confirm the collateral above"
                 // An unfunded account has no preview; funding happens first and the order re-checks admission.
                 : shortfall > 0n && (traderId === 0 || preview.data?.rejection === 8) ? null
                 : traderId === 0 ? "Enter a size to fund this market"
@@ -416,10 +425,12 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
               className={cx("ui-toggle h-8 border text-xs tnum disabled:cursor-not-allowed", targetLeverage === x ? "border-signal bg-signal/10 text-signal-text" : "border-line-strong bg-panel text-fg-2 hover:bg-press")}
               onClick={() => { const lots = leverageSizes[x - 1]; if (!lots) { setTargetLeverage(undefined); return; } setSize(lotsToClaims(lots)); setTargetLeverage(x); setInputRevision((n) => n + 1); }}>{x}×</button>)}
           </div>
-          {fresh && owner.connected && <div className="flex items-baseline justify-between gap-3 rounded-md bg-panel px-3 py-2.5" aria-live="polite">
-            <span className="label text-fg-3">Collateral</span>
-            <span className="text-right text-sm tnum text-fg">{requiredAtoms === undefined ? (parsed.ok ? (margin.isError ? "Unavailable" : "Calculating…") : "—")
-              : <>{atomsToUsdc(requiredAtoms)} {symbol}{shortfall > 0n && <span className="block text-xs text-fg-3">{marketCashAtoms > 0n ? `${atomsToUsdc(marketCashAtoms)} in market · ` : ""}{atomsToUsdc(shortfall)} from your wallet</span>}</>}</span>
+          {fresh && <div className="flex items-baseline justify-between gap-3 rounded-md bg-panel px-3 py-2.5" aria-live="polite">
+            <span className="label text-fg-3">Collateral needed</span>
+            <span className="text-right text-sm tnum text-fg">{requiredAtoms === undefined ? (parsed.ok ? (margin.isError ? "Unavailable" : "Calculating…") : "Enter a size")
+              : <>{atomsToUsdc(requiredAtoms)} {symbol}{!owner.connected
+                ? <span className="block text-xs text-fg-3">Comes from your wallet when you trade</span>
+                : shortfall > 0n && <span className="block text-xs text-fg-3">{marketCashAtoms > 0n ? `${atomsToUsdc(marketCashAtoms)} already in this market · ` : ""}{atomsToUsdc(shortfall)} from your wallet</span>}</>}</span>
           </div>}
           <details className="text-xs text-fg-3">
             <summary className="cursor-pointer py-1 hover:text-fg">Trading details</summary>
@@ -438,6 +449,26 @@ export function Ticket({ engine, market, trader, intent, bookPrice, levels, read
         <OrderSummary engine={engine} owner={owner.address} market={market} trader={trader} tradeIntent={tradeIntent}
           order={parsed.ok ? { tick: parsed.tick, lots: parsed.lots, isBuy: side === "buy", reduceOnly } : undefined}
           feeCapQ={preview.data?.rejection === 0 ? preview.data.feeCapQ : undefined} admittedLots={preview.data?.acceptedCapLots} unavailable={readUnavailable} />
+        {owner.connected && fundingSteps && parsed.ok && <div className="rounded-md p-3 text-xs shadow-[inset_0_0_0_1px_var(--color-signal)]" aria-label="Collateral included in this trade">
+          <p className="label text-signal-text">This trade includes collateral</p>
+          <ol className="mt-2 grid gap-1.5 text-fg-2">
+            {[
+              fundingSteps.approve > 0n && `Allow the Eros vault to use ${atomsToUsdc(fundingSteps.approve)} ${symbol}`,
+              fundingSteps.deposit > 0n && `Deposit ${atomsToUsdc(fundingSteps.deposit)} ${symbol} from your wallet into the vault`,
+              `Move ${atomsToUsdc(fundingSteps.allocate)} ${symbol} into this market as collateral${fundingSteps.deposit < fundingSteps.allocate ? ` (${atomsToUsdc(fundingSteps.allocate - fundingSteps.deposit)} already in your vault)` : ""}`,
+              `Place the order: ${intentLabel(tradeIntent)} · ${lotsToClaims(parsed.lots)} claims · ${orderType}${marketOrder ? ` ${side === "buy" ? "at most" : "at least"}` : " at"} ${price}`,
+            ].filter(Boolean).map((step, i) => <li key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-1.5"><span className="tnum text-fg-3">{i + 1}.</span><span>{step}</span></li>)}
+          </ol>
+          <p className="mt-2 leading-relaxed text-fg-3">{session.instant ? "These are signed instantly, without pop-ups." : "Your wallet asks you to confirm each step."} The collateral stays in this market until you release it from Balances.</p>
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-fg">
+            <span className="relative mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+              <input type="checkbox" checked={acknowledged} onChange={(e) => setAck(e.target.checked ? ackKey : undefined)}
+                className="peer absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none rounded-sm border border-line-strong bg-ground checked:border-signal checked:bg-signal" />
+              <Check size={12} strokeWidth={3} className="pointer-events-none relative hidden text-on-signal peer-checked:block" aria-hidden />
+            </span>
+            I understand {atomsToUsdc(shortfall)} {symbol} from my wallet becomes collateral for this trade.
+          </label>
+        </div>}
         {preview.data && <details className="text-xs text-fg-3">
           <summary className="cursor-pointer py-1 hover:text-fg">Margin and reserve</summary>
           {preview.data && <dl className="mt-2"><Row k="Required initial margin" v={preview.data.fullBackingRequired ? "Fully backed" : qToMoney(preview.data.requiredImQ).usdc} /><Row k="Equity after reservations" v={preview.data.id.markAvailable ? qToMoney(preview.data.eMinQ).usdc : "No mark"} /><Row k="Deficit if NO / YES" v={`${qToMoney(preview.data.d0AfterQ).usdc} / ${qToMoney(preview.data.d1AfterQ).usdc}`} /><Row k="Reserve coverage" v={preview.data.marketCoverageAfter ? "Covered" : "Unavailable"} /></dl>}

@@ -78,11 +78,12 @@
   .workspace {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 340px;
     grid-template-areas: "chart chart trade" "book trades account" "activity activity activity";
-    grid-template-rows: minmax(30rem, auto) minmax(0, 26rem) auto;
+    grid-template-rows: minmax(30rem, auto) auto auto;
   }
   .chart { min-height: 30rem; }
-  .book { max-height: 26rem; overflow: auto; }
-  .trades { max-height: 26rem; }
+  /* The cells fill the row (Balances can grow taller); their contents keep the 26rem cap and scroll. */
+  .book, .trades { max-height: none; }
+  .book > *, .trades > * { max-height: 26rem; overflow: auto; }
   .activityContent { min-height: 10rem; }
 }
 

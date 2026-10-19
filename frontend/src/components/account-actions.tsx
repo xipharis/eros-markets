@@ -30,7 +30,8 @@ export function AccountActions({ engine, m, t, readUnavailable = false }: { engi
   let amount = 0n, error = "";
   const available = !t ? 0n : mode === "Fund" ? t.wallet + t.free : mode === "Withdraw" ? t.free : t.account?.preview.usableReleaseAtoms ?? 0n;
   try { if (input) { amount = parseUsdcToAtoms(input); if (!amount) throw new Error("Enter an amount greater than zero."); if (t) amount = amountWithinBalance(amount, available); } } catch (e) { error = (e as Error).message; }
-  const validation = useFieldErrors({ amount: error || (!input ? "Enter an amount greater than zero." : "") });
+  // An empty box is not an error yet; the button already asks for an amount.
+  const validation = useFieldErrors({ amount: error });
   const readsReady = !!t && !!m && t.block === m.block && !readUnavailable;
   // Withdraw moves free vault funds and needs only the account read, never market readiness.
   const withdrawReady = !!t && !readUnavailable;
@@ -81,10 +82,10 @@ export function AccountActions({ engine, m, t, readUnavailable = false }: { engi
     {mode === "Release" && m && !m.halted && !m.risk.indexAvailable && <p role="status" className="border-l-2 border-signal pl-2 text-xs leading-relaxed text-fg-2">Releasing market collateral requires a fresh index, including for a flat account. Existing free vault funds can still be withdrawn.</p>}
     <label className="flex flex-col gap-1.5">
       <span className="label text-fg-3">Amount ({t?.assets.symbol ?? deployment.risk.collateralSymbol})</span>
-      <div className="flex"><input inputMode="decimal" disabled={busy} {...validation.props("amount")} value={input} onChange={(e) => setInput(e.target.value)} placeholder="0.00" className="h-10 min-w-0 flex-1 border border-line-strong bg-ground px-2 text-sm tnum" /><Button className="h-10" disabled={!t || busy} onClick={() => setInput(atomsToInput(available))}>Max</Button></div>
+      <div className="flex"><input inputMode="decimal" disabled={busy} {...validation.props("amount")} value={input} onChange={(e) => setInput(e.target.value)} placeholder="0.00" className="h-10 min-w-0 flex-1 rounded-l-control border border-line-strong bg-ground px-3 text-sm tnum" /><Button className="h-10 rounded-r-control" disabled={!t || busy} onClick={() => setInput(atomsToInput(available))}>Max</Button></div>
       <FieldError id={validation.errorId("amount")}>{validation.message("amount")}</FieldError>
     </label>
-    <p className="text-xs text-fg-3">Available: {t ? atomsToUsdc(available, 6) : "—"}</p>
+    <p className="text-xs text-fg-3">Available: {t ? atomsToUsdc(available, 2) : "—"} {t?.assets.symbol ?? deployment.risk.collateralSymbol}</p>
     <Button size="lg" variant="primary" disabled={busy || !!blocker} onClick={submit}>{busy ? "Transaction pending…" : blocker || `${mode} collateral`}</Button>
     {mode === "Fund" && t && t.wallet + t.free === 0n && <div className="grid gap-2"><Button disabled={busy || owner.wrongChain || !readsReady} onClick={() => owner.address && tx.run(owner.address, [{ address: t.assets.token, abi: faucetAbi, functionName: "mint", args: [owner.address, 1000_000000n], label: "get 1,000 test tokens" }])}>Get 1,000 test tokens</Button><p className="text-xs text-fg-3">Free test collateral with no monetary value. Test MON is needed for gas.</p></div>}
     {claimable && <Button size="lg" disabled={busy || owner.wrongChain || !readsReady} onClick={() => owner.address && tx.run(owner.address, [{ ...ownerTrader(engine, owner.address).claim(), label: "claim settlement" }])}>Claim {atomsToUsdc(t!.account!.claimable)} {t?.assets.symbol ?? deployment.risk.collateralSymbol}</Button>}

@@ -1,5 +1,7 @@
 "use client";
 
+import { MoneyPanel } from "./money-panel";
+
 import type { Address } from "viem";
 import { ExternalLink } from "lucide-react";
 import { isClaimable, decodeSettlementStatus, STATUS_TEXT } from "@eros/risk-sdk";
@@ -143,6 +145,7 @@ export function AccountPanel({ engine, m, t, readUnavailable = false }: { engine
         <Row k="Releasable" v={p ? atomsToUsdc(p.usableReleaseAtoms, 2) : "—"} hint="Collateral the contract currently permits you to move back to the vault." />
         {claimable && t?.account && <Row k="Claimable" v={atomsToUsdc(t.account.claimable, 2)} />}
       </dl>
+      <MoneyPanel engine={engine} owner={owner.address} m={m} t={t} compact />
       {settlement && settlement.halted && (
         <p className="px-3 pb-2 text-xs text-fg-2">{STATUS_TEXT[decodeSettlementStatus(settlement as never)]}</p>
       )}
@@ -196,55 +199,33 @@ export function MarketInfo({ manifest, m }: { manifest: MarketManifest; m?: Mark
 const usd2 = (q: bigint) => qToMoney(q).usdc.replace(/(\.\d{2})\d+$/, "$1");
 
 /** Position and margin below the chart (contract FIRST VIEWPORT): contract previews only, at one block. */
-export function PositionPanel({ m, t, onReduce }: { m?: MarketSnapshot; t?: TraderSnapshot; onReduce?: (bps: number) => void }) {
+export function PositionPanel({ engine, m, t, onReduce }: { engine: Address; m?: MarketSnapshot; t?: TraderSnapshot; onReduce?: (bps: number) => void }) {
   const owner = useOwner();
   if (!owner.connected) return <p className="px-4 py-6 text-xs text-fg-3">Log in to see your positions.</p>;
   if (!t) return <p role="status" className="p-4 text-xs text-fg-3">Reading your account…</p>;
   const p = t.account?.preview;
   const r = t.account?.riskView;
-  if (!p || !r) {
-    return (
-      <p className="px-4 py-6 text-xs leading-relaxed text-fg-3">
-        No position yet. Open Manage collateral in Balances to fund this market.
-      </p>
-    );
-  }
-  const markOk = p.id.markAvailable;
-  const w = p.positionLots >= 0n ? p.id.markWad : 10n ** 18n - p.id.markWad;
-  const exposureQ = (p.positionLots < 0n ? -p.positionLots : p.positionLots) * 1000n * w;
-  const lev = markOk && p.markEquityQ > 0n && p.positionLots !== 0n ? (exposureQ * 100n) / p.markEquityQ : undefined;
+  if (!p || !r) return <div className="p-4"><MoneyPanel engine={engine} owner={owner.address} m={m} t={t} /></div>;
   const canReduce = !!m && !m.halted && t.block === m.block && !!onReduce;
   return (
     <div>
-      {(r.graceActive || r.liquidationMode !== 0 || (markOk && p.status >= 3)) && <p role="status" className="border-b border-signal/30 bg-signal/5 px-4 py-2 text-xs text-signal-text">
+      {(r.graceActive || r.liquidationMode !== 0 || (p.id.markAvailable && p.status >= 3)) && <p role="status" className="border-b border-signal/30 bg-signal/5 px-4 py-2 text-xs text-signal-text">
         {r.graceActive ? `Margin grace ends ${fmtUtc(r.graceEndsAt)}. Add collateral or reduce your position.`
           : r.liquidationMode === 2 ? "Account eligible for takeover. Review your collateral immediately."
           : "Position at risk of liquidation. Add collateral or reduce your position."}
       </p>}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-xs">
-          <thead className="hair-b text-fg-3"><tr>
-            {["Position", "Equity (USDC)", "Leverage", "Health", "Actions"].map(label => <th key={label} scope="col" className="whitespace-nowrap px-4 py-2 font-normal">{label}</th>)}
-          </tr></thead>
-          <tbody><tr className="hair-b">
-            <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{positionLabel(p.positionLots)}</td>
-            <td className="px-4 py-3 tnum">{markOk ? usd2(p.markEquityQ) : <Unavailable short="No mark" signal reason="Equity is unavailable until a valid mark is available." />}</td>
-            <td className="px-4 py-3 tnum">{lev !== undefined ? `${lev / 100n}.${(lev % 100n).toString().padStart(2, "0")}×` : "—"}</td>
-            <td className={cx("whitespace-nowrap px-4 py-3", p.status >= 3 ? "text-signal-text" : "text-fg-2")}>{markOk || p.positionLots === 0n ? HEALTH[p.status] : "Unavailable"}</td>
-            <td className="px-4 py-2">{p.positionLots !== 0n && !m?.halted ? <div className="flex items-center gap-2">
-              <Button size="sm" disabled={!canReduce} onClick={() => onReduce?.(10000)} title="Prepare a close order; once it fills, the remaining collateral returns to your wallet">Close position</Button>
-              {(p.positionLots > 1n || p.positionLots < -1n) && <Button size="sm" disabled={!canReduce} onClick={() => onReduce?.(5000)} title="Prepare an order to reduce your position by half">Reduce 50%</Button>}
-            </div> : <span className="text-fg-3">—</span>}</td>
-          </tr></tbody>
-        </table>
-      </div>
+      <div className="p-4"><MoneyPanel engine={engine} owner={owner.address} m={m} t={t} /></div>
+      {p.positionLots !== 0n && !m?.halted && <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
+        <Button size="sm" disabled={!canReduce} onClick={() => onReduce?.(10000)} title="Prepare a close order; once it fills, the remaining collateral returns to your wallet">Close position</Button>
+        {(p.positionLots > 1n || p.positionLots < -1n) && <Button size="sm" disabled={!canReduce} onClick={() => onReduce?.(5000)} title="Prepare an order to reduce your position by half">Reduce 50%</Button>}
+      </div>}
       <details className="px-4">
         <summary className="cursor-pointer py-3 text-xs text-fg-2 focus-visible:outline-2 focus-visible:outline-signal">Margin & funding details</summary>
         <div className={cx(terminalStyles.details, "grid gap-x-8 pb-3")}>
           <dl>
             <Row k="Market balance" v={usd2(p.cashQ)} hint="Already includes projected funding and premium; negative when leveraged." />
             <Row k="Value if YES / NO" v={`${usd2(p.e1Q)} / ${usd2(p.e0Q)}`} />
-            <Row k="Initial / maintenance margin" v={p.fullBackingRequired ? "Fully backed" : markOk ? `${usd2(BigInt(p.imQ))} / ${usd2(BigInt(p.mmQ))}` : "—"} />
+            <Row k="Initial / maintenance margin" v={p.fullBackingRequired ? "Fully backed" : p.id.markAvailable ? `${usd2(BigInt(p.imQ))} / ${usd2(BigInt(p.mmQ))}` : "—"} />
           </dl>
           <dl>
             <Row k="Open YES bids" v={`${lotsToClaims(BigInt(p.orders.bidLots))} claims · ${usd2(p.orders.bidValueQ)}`} />
