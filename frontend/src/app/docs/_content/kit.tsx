@@ -1,3 +1,4 @@
+import katex from "katex";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -42,7 +43,14 @@ export function Cards({ items }: { items: { href: string; title: string; text: s
   );
 }
 
-/** A formula or exact expression, set apart from the prose. */
-export function Formula({ children }: { children: ReactNode }) {
-  return <pre className="overflow-x-auto rounded-[var(--radius-control)] border border-line bg-panel px-4 py-3 text-xs leading-6 text-fg">{children}</pre>;
+const tex = (source: string, displayMode: boolean) => ({ __html: katex.renderToString(source, { displayMode, throwOnError: true, strict: "error" }) });
+
+/** A formula in TeX, typeset as display math and set apart from the prose. */
+export function Formula({ tex: source }: { tex: string }) {
+  return <div className="overflow-x-auto rounded-[var(--radius-control)] border border-line bg-panel px-4 py-1 text-sm text-fg" dangerouslySetInnerHTML={tex(source, true)} />;
+}
+
+/** An inline TeX expression inside prose or a table cell. */
+export function Tex({ children }: { children: string }) {
+  return <span dangerouslySetInnerHTML={tex(children, false)} />;
 }

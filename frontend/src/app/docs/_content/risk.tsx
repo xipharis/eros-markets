@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Formula, Note, Table, type DocGroup } from "./kit";
+import { Formula, Note, Table, Tex, type DocGroup } from "./kit";
 
 export const risk: DocGroup = {
   title: "Risk and pricing",
@@ -10,11 +10,13 @@ export const risk: DocGroup = {
       summary: "Leverage limits, margin requirements and order admission.",
       sections: [
         { id: "backing", title: "Full backing and leverage", body: <>
-          <p>Each account has two terminal values: its value if the market resolves NO (<strong>E0</strong>) and its value if it resolves YES (<strong>E1</strong>). An account is <strong>fully backed</strong> when both are non-negative. A fully backed account cannot lose more than its collateral and is not subject to price-based liquidation.</p>
+          <p>Each account has two terminal values: its value if the market resolves NO (<Tex>{"E_0"}</Tex>) and its value if it resolves YES (<Tex>{"E_1"}</Tex>). An account is <strong>fully backed</strong> when both are non-negative. A fully backed account cannot lose more than its collateral and is not subject to price-based liquidation.</p>
           <p>An account is <strong>leveraged</strong> when one terminal value is negative. That shortfall, the <em>deficit</em>, is covered by the market&apos;s <Link href="/docs/reserve">reserve</Link>. Leveraged accounts pay a <Link href="/docs/funding#premium">jump premium</Link> to the reserve and are subject to margin requirements.</p>
-          <Formula>{`E0 = cash
-E1 = cash + position
-E(q) = cash + position × q        (equity at mark q)`}</Formula>
+          <Formula tex={String.raw`\begin{aligned}
+E_0 &= \text{cash} \\
+E_1 &= \text{cash} + \text{position} \\
+E(q) &= \text{cash} + \text{position} \times q && \text{(equity at mark } q\text{)}
+\end{aligned}`} />
         </> },
         { id: "example", title: "Example", body: <>
           <p>Account A deposits 120 tUSDC and buys 1,000 claims at 0.60. Account B deposits 100 tUSDC and sells those claims.</p>
@@ -23,7 +25,7 @@ E(q) = cash + position × q        (equity at mark q)`}</Formula>
             ["Deposit", "120", "100"],
             ["Cash after fill", "−480", "700"],
             ["Equity at 0.60", "120", "100"],
-            ["E0 / E1", "−480 / 520", "700 / −300"],
+            [<Tex key="e">{"E_0 / E_1"}</Tex>, "−480 / 520", "700 / −300"],
             ["Leverage", "600 / 120 = 5×", "400 / 100 = 4×"],
             ["Payout if NO / YES", "0 / 520", "700 / 0"],
           ]} />
@@ -49,22 +51,23 @@ E(q) = cash + position × q        (equity at mark q)`}</Formula>
           <p>Both are bounded above by the position&apos;s worst-case loss: the price per claim for a long, and one minus the price for a short. That bound equals the full-backing requirement.</p>
         </> },
         { id: "formula", title: "Margin model", body: <>
-          <p>For a position of |x| claims with worst-case loss w per claim:</p>
-          <Formula>{`MM = min( |x|·w ,  |x|·(m_side + k·σ_h + s) + ½·λ·x² )
-IM = min( |x|·w ,  max( γ·MM ,  |x|·w / cap ) )
-
-σ_h = max( √(q(1−q)·h / (T−t)) , σ_realized , σ_template )
-h   = h0 + |x| / v + queue`}</Formula>
+          <p>For a position of <Tex>{"|x|"}</Tex> claims with worst-case loss <Tex>{"w"}</Tex> per claim:</p>
+          <Formula tex={String.raw`\begin{aligned}
+\mathrm{MM} &= \min\Bigl(|x|\,w,\; |x|\,\bigl(m_{\text{side}} + k\,\sigma_h + s\bigr) + \tfrac{1}{2}\,\lambda\,x^2\Bigr) \\
+\mathrm{IM} &= \min\Bigl(|x|\,w,\; \max\bigl(\gamma\,\mathrm{MM},\; |x|\,w / \text{cap}\bigr)\Bigr) \\[6pt]
+\sigma_h &= \max\left(\sqrt{\frac{q(1-q)\,h}{T-t}},\; \sigma_{\text{realized}},\; \sigma_{\text{template}}\right) \\
+h &= h_0 + \frac{|x|}{v} + \text{queue}
+\end{aligned}`} />
           <Table rows={[
             ["Term", "Meaning"],
-            ["m_side", "Adverse drift from the probability of a jump against the position"],
-            ["k·σ_h", "Tail allowance over the close-out horizon h"],
-            ["s", "Spread and slippage allowance"],
-            ["λ", "Size-impact coefficient, applied to the square of the position"],
-            ["γ", "Ratio of initial to maintenance margin"],
-            ["T − t", "Time remaining to resolution"],
+            [<Tex key="m">{String.raw`m_{\text{side}}`}</Tex>, "Adverse drift from the probability of a jump against the position"],
+            [<Tex key="k">{String.raw`k\,\sigma_h`}</Tex>, <>Tail allowance over the close-out horizon <Tex>{"h"}</Tex></>],
+            [<Tex key="s">{"s"}</Tex>, "Spread and slippage allowance"],
+            [<Tex key="l">{String.raw`\lambda`}</Tex>, "Size-impact coefficient, applied to the square of the position"],
+            [<Tex key="g">{String.raw`\gamma`}</Tex>, "Ratio of initial to maintenance margin"],
+            [<Tex key="t">{"T - t"}</Tex>, "Time remaining to resolution"],
           ]} />
-          <p>The volatility term increases as T − t decreases, so margin rises as resolution approaches. Larger positions have a longer close-out horizon and therefore a higher requirement per claim.</p>
+          <p>The volatility term increases as <Tex>{"T - t"}</Tex> decreases, so margin rises as resolution approaches. Larger positions have a longer close-out horizon and therefore a higher requirement per claim.</p>
           <p>Rounding is always against the trader. Missing, expired or out-of-range risk parameters cause the engine to require full backing.</p>
         </> },
         { id: "admission", title: "Order admission", body: <p>Leverage is not an order parameter. It results from the position relative to equity, with every resting order assumed to fill at its worst limit. Consequently, <Link href="/docs/orders#open-orders">open orders consume margin</Link>, and bids placed well above the mark consume margin immediately, while bids at the mark consume little.</p> },
@@ -106,8 +109,8 @@ h   = h0 + |x| / v + queue`}</Formula>
         { id: "eligibility", title: "Eligibility", body: <>
           <p>Eligibility is evaluated in the following order:</p>
           <ol>
-            <li>Final-day floor active and E0 &lt; 0 or E1 &lt; 0: takeover.</li>
-            <li>E0 ≤ 0 and E1 ≤ 0 (not both zero): takeover.</li>
+            <li>Final-day floor active and <Tex>{"E_0 < 0"}</Tex> or <Tex>{"E_1 < 0"}</Tex>: takeover.</li>
+            <li><Tex>{String.raw`E_0 \le 0`}</Tex> and <Tex>{String.raw`E_1 \le 0`}</Tex> (not both zero): takeover.</li>
             <li>Mark stale: not eligible.</li>
             <li>Equity at the mark ≤ 0: takeover.</li>
             <li>Equity &lt; MM: reduction.</li>
@@ -140,13 +143,13 @@ h   = h0 + |x| / v + queue`}</Formula>
           <p>Both are enabled per market and are inactive in bootstrap mode. Where a market has them disabled, the terminal does not display them.</p>
         </> },
         { id: "funding", title: "Funding", body: <>
-          <p>Funding operates in <strong>hourly epochs</strong>. At each epoch opening, the engine fixes a daily per-claim rate from the difference between the mark q and the index I:</p>
-          <Formula>{`f = clamp( q − I ,  −0.05·min(I, 1−I) ,  +0.05·min(I, 1−I) )   per claim per day`}</Formula>
+          <p>Funding operates in <strong>hourly epochs</strong>. At each epoch opening, the engine fixes a daily per-claim rate from the difference between the mark <Tex>{"q"}</Tex> and the index <Tex>{"I"}</Tex>:</p>
+          <Formula tex={String.raw`f = \operatorname{clamp}\bigl(q - I,\; -0.05\,\min(I,\, 1-I),\; +0.05\,\min(I,\, 1-I)\bigr) \quad \text{per claim per day}`} />
           <p>A positive rate means longs pay shorts. Payments are drawn from a budget authorized at the epoch opening. Funding stops for the remainder of the epoch on budget exhaustion, a stale index, T − 12h, zero open interest, or a halt, and does not resume within that epoch.</p>
         </> },
         { id: "premium", title: "Jump premium", body: <>
           <p>Leveraged accounts pay the reserve for covering their deficit:</p>
-          <Formula>{`premium = deficit × (1 + load) × hazard × multiplier   per day`}</Formula>
+          <Formula tex={String.raw`\text{premium} = \text{deficit} \times (1 + \text{load}) \times \text{hazard} \times \text{multiplier} \quad \text{per day}`} />
           <p>The hazard is the market&apos;s estimated rate of an adverse jump. A <strong>4× multiplier</strong> applies for six hours after a new deficit is created, then reverts to 1×. The terminal displays the estimated daily premium and the surcharge countdown.</p>
           <p>The tariff is fixed at each epoch opening. Hazard increases requested by the market monitor take effect from the next epoch.</p>
         </> },
@@ -168,8 +171,10 @@ h   = h0 + |x| / v + queue`}</Formula>
         ]} /> },
         { id: "polymarket", title: "External reference", body: <p>For external events, Polymarket is used only as a price reference. Orders are not routed to Polymarket and its liquidity is not used; all trades match on Eros, against Eros liquidity and collateral. A price publisher fetches the source, validates it and publishes signed observations on chain.</p> },
         { id: "mark", title: "Mark construction", body: <>
-          <Formula>{`mark = median( index + basis₉₀₀ ,  perp₆₀ ,  live perp impact mid )
-band = index ± 0.05 × (T − t) / (T − listedAt)`}</Formula>
+          <Formula tex={String.raw`\begin{aligned}
+\text{mark} &= \operatorname{median}\bigl(\text{index} + \text{basis}_{900},\; \text{perp}_{60},\; \text{live perp impact mid}\bigr) \\
+\text{band} &= \text{index} \pm 0.05 \times \frac{T - t}{T - \text{listedAt}}
+\end{aligned}`} />
           <p>The band narrows as resolution approaches, tightening the mark toward the external reference. The median prevents any single input from moving the mark alone.</p>
         </> },
         { id: "availability", title: "Availability", body: <>
@@ -193,7 +198,7 @@ band = index ± 0.05 × (T − t) / (T − listedAt)`}</Formula>
         { id: "overview", title: "Overview", body: <>
           <p>Each market has an isolated reserve held in a ReserveVault. The reserve absorbs leveraged losses that exceed trader collateral and earns jump premiums in return, as well as funding when it holds a position (for example after a takeover).</p>
           <p>The engine enforces, separately for each outcome, that the reserve covers the sum of all trader deficits plus the unspent funding budget:</p>
-          <Formula>{`R_y ≥ D̄_y + B     for y ∈ {NO, YES}`}</Formula>
+          <Formula tex={String.raw`R_y \ge \bar{D}_y + B \qquad \text{for } y \in \{\text{NO}, \text{YES}\}`} />
           <p>If both outcomes are covered, every INVALID settlement price between them is covered as well.</p>
         </> },
         { id: "seeding", title: "Seeding", body: <>

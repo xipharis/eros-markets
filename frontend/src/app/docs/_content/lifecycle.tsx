@@ -98,9 +98,11 @@ export const lifecycle: DocGroup = {
         </> },
         { id: "payout", title: "Payout calculation", body: <>
           <p>The payout equals the account value at the settlement price, floored at zero (position in claims):</p>
-          <Formula>{`YES      payout = max(0, cash + position)
-NO       payout = max(0, cash)
-INVALID  payout = max(0, cash + position × settlement price)`}</Formula>
+          <Formula tex={String.raw`\begin{aligned}
+&\text{YES:} && \text{payout} = \max(0,\ \text{cash} + \text{position}) \\
+&\text{NO:} && \text{payout} = \max(0,\ \text{cash}) \\
+&\text{INVALID:} && \text{payout} = \max(0,\ \text{cash} + \text{position} \times \text{settlement price})
+\end{aligned}`} />
           <p>A leveraged account on the losing side receives zero; the reserve covers the shortfall.</p>
         </> },
         { id: "invalid", title: "INVALID settlement price", body: <p>For an INVALID outcome, the engine captures the market&apos;s time-weighted price over the 24 hours preceding T. Where the window is incomplete one hour after T, markets that disclosed a fallback settle at 0.5.</p> },

@@ -1,3 +1,4 @@
+import "katex/dist/katex.min.css";
 import { DOC_GROUPS, docHref } from "./_content";
 import { DocsNav } from "./docs-nav";
 
